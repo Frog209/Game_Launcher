@@ -8,8 +8,6 @@ project_dir = Path.cwd()
 
 datas = []
 for name in [
-    "steam_icon.ico",
-    "epic_icon.ico",
 ]:
     p = project_dir / name
     if p.exists():

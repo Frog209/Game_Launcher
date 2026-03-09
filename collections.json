@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Epic",
+    "type": "dynamic",
+    "filters": {
+      "platforms": [
+        "Epic"
+      ],
+      "played_state": "any",
+      "installed_state": "any",
+      "min_hours": 0,
+      "tags": []
+    }
+  }
+]

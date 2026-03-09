@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets and local config
+.env
+
+# Build outputs
+build/
+dist/
+release/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+
+# User-local launcher data
+saved_library.json
+steam_appid_cache.json
+steam_tags_cache.json
+missing_covers.json
+covers/custom/*
+!covers/custom/
+!covers/custom/.gitkeep

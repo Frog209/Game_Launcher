@@ -16,7 +16,7 @@ for name in [
 block_cipher = None
 
 a = Analysis(
-    ["ui_test.py"],
+    ["main.py"],
     pathex=[str(project_dir)],
     binaries=[],
     datas=datas,

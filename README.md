@@ -10,6 +10,9 @@ A portable Windows launcher for Steam and Epic games with cover art, collections
 - Optional Steam API integration for richer metadata
 - Portable build with no installer required
 
+## Screenshots
+![Game Launcher Main View](assets/screenshots/main-view.png)
+
 ## Download (Windows)
 1. Open the repo **Releases** page.
 2. Download `GameLauncher-portable-windows.zip` from the latest version.

@@ -4,6 +4,7 @@ import json
 import re
 import html
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
 import time
 import subprocess
@@ -1174,8 +1175,8 @@ class SteamCredentialsDialog(QDialog):
         id_row.addWidget(make_info_bubble(
             "1. Open Steam and go to your profile.\n"
             "2. Right-click the page and Copy Page URL.\n"
-            "3. If it includes a numeric profile ID, you can paste it directly here.\n"
-            "4. Otherwise use https://steamid.io/lookup to convert to SteamID64."
+            "3. If it includes a numeric profile ID, paste it directly here.\n"
+            "4. You can also paste the numeric SteamID64 directly."
         ))
         id_row.addStretch()
         layout.addLayout(id_row)
@@ -1188,11 +1189,8 @@ class SteamCredentialsDialog(QDialog):
         id_actions.setContentsMargins(0, 0, 0, 0)
         id_actions.setSpacing(8)
         open_profile_btn = QPushButton("Open Steam Profile")
-        open_lookup_btn = QPushButton("Open ID Lookup")
         open_profile_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://steamcommunity.com/my")))
-        open_lookup_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://steamid.io/lookup")))
         id_actions.addWidget(open_profile_btn)
-        id_actions.addWidget(open_lookup_btn)
         id_actions.addStretch()
         layout.addLayout(id_actions)
 
@@ -2525,76 +2523,41 @@ class GameGridApp(QWidget):
         def worker():
             unresolved = []
             try:
-                for card in cards:
-                    if card.platform == "Epic":
-                        appid = lookup_steam_appid_by_name(card.name, allow_network=True)
-                        if not appid:
-                            unresolved.append({
-                                "name": card.name,
-                                "platform": card.platform,
-                                "reason": "appid_not_found",
-                            })
-                            continue
-
-                        local_path = get_steam_capsule(appid, allow_download=False)
-                        if local_path is None:
-                            local_path = get_steam_capsule(appid, allow_download=True)
-                        if local_path is None:
-                            unresolved.append({
-                                "name": card.name,
-                                "platform": card.platform,
-                                "appid": appid,
-                                "reason": "cover_not_found",
-                            })
-                            continue
-
-                        if not card.tags:
-                            tags = get_steam_app_tags(appid, allow_network=True)
-                            if tags:
-                                card.update_tags(tags)
-                                for game in self.games:
-                                    if game.get("name") == card.name:
-                                        game["tags"] = tags
-                                        break
-                                self._save_game_runtime_state(card)
-
-                        self.coverResolved.emit(card, appid)
-                        continue
-
+                def resolve_card_cover(card):
+                    platform = str(card.platform or "")
                     appid = card.appid
                     if not appid:
                         appid = lookup_steam_appid_by_name(card.name, allow_network=True)
                     if not appid:
-                        unresolved.append({
+                        return None, {
                             "name": card.name,
-                            "platform": card.platform,
+                            "platform": platform,
                             "reason": "appid_not_found",
-                        })
-                        continue
+                        }
 
                     local_path = get_steam_capsule(appid, allow_download=False)
                     if local_path is None:
                         local_path = get_steam_capsule(appid, allow_download=True)
                     if local_path is None:
-                        unresolved.append({
+                        return None, {
                             "name": card.name,
-                            "platform": card.platform,
+                            "platform": platform,
                             "appid": appid,
                             "reason": "cover_not_found",
-                        })
-                        continue
+                        }
 
-                    if not card.tags:
-                        tags = get_steam_app_tags(appid, allow_network=True)
-                        if tags:
-                            card.update_tags(tags)
-                            for game in self.games:
-                                if game.get("name") == card.name:
-                                    game["tags"] = tags
-                                    break
-                            self._save_game_runtime_state(card)
+                    return (card, appid), None
 
-                    self.coverResolved.emit(card, appid)
+                max_workers = max(4, min(12, (os.cpu_count() or 8)))
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = [pool.submit(resolve_card_cover, card) for card in cards]
+                    for future in as_completed(futures):
+                        resolved, issue = future.result()
+                        if issue is not None:
+                            unresolved.append(issue)
+                            continue
+                        card, appid = resolved
+                        self.coverResolved.emit(card, appid)
             finally:
                 if write_report:
                     self._write_missing_covers_report(unresolved)

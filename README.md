@@ -1,34 +1,45 @@
 ﻿# Game Launcher
 
-Windows game launcher for Steam/Epic libraries.
+A portable Windows launcher for Steam and Epic games with cover art, collections, filters, and quick launch.
 
-## Download (for users)
-- Go to the **Releases** page of this repo.
-- Download `GameLauncher-portable-windows.zip`.
-- Extract it anywhere.
-- Run `GameLauncher.exe`.
+## Features
+- Detects Steam and Epic game libraries
+- Grid view with cover art and hover details
+- Manual and dynamic collections
+- Sort and filter options (including Installed Only)
+- Optional Steam API integration for richer metadata
+- Portable build with no installer required
 
-## Build portable locally (for you)
+## Download (Windows)
+1. Open the repo **Releases** page.
+2. Download `GameLauncher-portable-windows.zip` from the latest version.
+3. Extract the zip anywhere you want.
+4. Run `GameLauncher.exe`.
+
+## First-Time Setup
+- On first launch, the app can ask whether to create a desktop shortcut.
+- Steam API credentials are optional. You can add them from **Integrations** in the app if you want richer Steam metadata.
+- The app creates its local data files on first run.
+
+## Build Portable Locally
 From the project root:
 
 ```powershell
 .\build_portable.ps1
 ```
 
-The output zip is:
+Output:
 - `release/GameLauncher-portable-windows.zip`
 
-## Auto-build on GitHub
-This repo includes a GitHub Actions workflow that builds a portable Windows ZIP.
+## Release Workflow (Maintainer)
+A GitHub Actions workflow builds the Windows portable zip when a version tag is pushed.
 
-To publish a new downloadable version:
+Example:
 
 ```powershell
-& ''C:\Program Files\Git\cmd\git.exe'' add .
-& ''C:\Program Files\Git\cmd\git.exe'' commit -m "Release v1.0.0"
-& ''C:\Program Files\Git\cmd\git.exe'' tag v1.0.0
-& ''C:\Program Files\Git\cmd\git.exe'' push origin main --tags
+& 'C:\Program Files\Git\cmd\git.exe' add .
+& 'C:\Program Files\Git\cmd\git.exe' commit -m "Release v1.0.3"
+& 'C:\Program Files\Git\cmd\git.exe' tag v1.0.3
+& 'C:\Program Files\Git\cmd\git.exe' push origin main
+& 'C:\Program Files\Git\cmd\git.exe' push origin v1.0.3
 ```
-
-When the `v*` tag is pushed, GitHub Actions builds and attaches
-`GameLauncher-portable-windows.zip` to that release tag.

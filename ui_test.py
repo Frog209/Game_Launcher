@@ -17,9 +17,9 @@ from PyQt6.QtWidgets import (
     QPushButton, QGraphicsDropShadowEffect, QLineEdit, QMessageBox, QFrame,
     QListWidget, QListWidgetItem, QCheckBox, QSpinBox, QMenu, QListView, QDoubleSpinBox, QFileDialog
 )
-from PyQt6.QtGui import QPixmap, QCursor, QPainter, QColor, QAction
+from PyQt6.QtGui import QPixmap, QCursor, QPainter, QColor, QAction, QDesktopServices
 from PyQt6.QtCore import (
-    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths
+    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths, QUrl
 )
 
 if getattr(sys, "frozen", False):
@@ -35,6 +35,16 @@ COVERS_DIR = os.path.join(PROJECT_DIR, "covers")
 CUSTOM_COVERS_DIR = os.path.join(COVERS_DIR, "custom")
 MISSING_COVERS_FILE = os.path.join(PROJECT_DIR, "missing_covers.json")
 NEW_COLLECTION_OPTION = "*Add New Collection*"
+
+
+def extract_steam_id64(raw_value: str):
+    value = str(raw_value or "").strip()
+    if value.isdigit():
+        return value
+    match = re.search(r"\b(\d{17})\b", value)
+    if match:
+        return match.group(1)
+    return ""
 
 # ---------------- TOP BAR BUTTON STYLE ----------------
 
@@ -1047,7 +1057,8 @@ class SteamCredentialsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Steam Integration")
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
+        self._validation_ok = False
         self.setStyleSheet("""
             QDialog{
                 background-color: #121822;
@@ -1099,11 +1110,19 @@ class SteamCredentialsDialog(QDialog):
                 border:1px solid rgba(102,192,244,0.95);
                 color:#e8f7ff;
             }
+            QLabel#helperNote{
+                color:#8fb3cc;
+                font-size:11px;
+            }
+            QLabel#validationState{
+                font-size:11px;
+                color:#8fb3cc;
+            }
         """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         title = QLabel("Steam Account")
         title.setStyleSheet("color:#e8f3ff; font-size:14px; font-weight:600;")
@@ -1143,23 +1162,43 @@ class SteamCredentialsDialog(QDialog):
             b.clicked.connect(lambda: show_info_popup(message))
             return b
 
+        step1 = QLabel("Step 1: Steam ID64")
+        step1.setStyleSheet("color:#e8f3ff; font-size:12px; font-weight:600;")
+        layout.addWidget(step1)
+
         id_row = QHBoxLayout()
         id_row.setContentsMargins(0, 0, 0, 0)
         id_row.setSpacing(6)
-        id_label = QLabel("Steam ID64")
+        id_label = QLabel("Steam ID64 or profile URL")
         id_row.addWidget(id_label)
         id_row.addWidget(make_info_bubble(
             "1. Open Steam and go to your profile.\n"
             "2. Right-click the page and Copy Page URL.\n"
-            "3. Paste it into https://steamid.io/lookup.\n"
-            "4. Use the numeric SteamID64 value."
+            "3. If it includes a numeric profile ID, you can paste it directly here.\n"
+            "4. Otherwise use https://steamid.io/lookup to convert to SteamID64."
         ))
         id_row.addStretch()
         layout.addLayout(id_row)
         self.steamid_input = QLineEdit()
-        self.steamid_input.setPlaceholderText("7656119...")
+        self.steamid_input.setPlaceholderText("7656119... or https://steamcommunity.com/profiles/...")
         self.steamid_input.setText(steamid64)
         layout.addWidget(self.steamid_input)
+
+        id_actions = QHBoxLayout()
+        id_actions.setContentsMargins(0, 0, 0, 0)
+        id_actions.setSpacing(8)
+        open_profile_btn = QPushButton("Open Steam Profile")
+        open_lookup_btn = QPushButton("Open ID Lookup")
+        open_profile_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://steamcommunity.com/my")))
+        open_lookup_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://steamid.io/lookup")))
+        id_actions.addWidget(open_profile_btn)
+        id_actions.addWidget(open_lookup_btn)
+        id_actions.addStretch()
+        layout.addLayout(id_actions)
+
+        step2 = QLabel("Step 2: Steam Web API Key")
+        step2.setStyleSheet("color:#e8f3ff; font-size:12px; font-weight:600;")
+        layout.addWidget(step2)
 
         key_row = QHBoxLayout()
         key_row.setContentsMargins(0, 0, 0, 0)
@@ -1179,15 +1218,81 @@ class SteamCredentialsDialog(QDialog):
         self.api_key_input.setText(api_key)
         layout.addWidget(self.api_key_input)
 
+        key_actions = QHBoxLayout()
+        key_actions.setContentsMargins(0, 0, 0, 0)
+        key_actions.setSpacing(8)
+        open_key_page_btn = QPushButton("Open API Key Page")
+        open_key_page_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://steamcommunity.com/dev/apikey")))
+        key_actions.addWidget(open_key_page_btn)
+        key_actions.addStretch()
+        layout.addLayout(key_actions)
+
+        note = QLabel("Credentials are stored locally on this PC.")
+        note.setObjectName("helperNote")
+        layout.addWidget(note)
+
+        self.validation_label = QLabel("")
+        self.validation_label.setObjectName("validationState")
+        layout.addWidget(self.validation_label)
+
         actions = QHBoxLayout()
-        actions.addStretch()
         cancel_btn = QPushButton("Cancel")
+        validate_btn = QPushButton("Validate Connection")
         save_btn = QPushButton("Save")
         cancel_btn.clicked.connect(self.reject)
+        validate_btn.clicked.connect(self.validate_connection)
         save_btn.clicked.connect(self.accept)
+        actions.addStretch()
+        actions.addWidget(validate_btn)
         actions.addWidget(cancel_btn)
         actions.addWidget(save_btn)
         layout.addLayout(actions)
+
+        self.steamid_input.textChanged.connect(self._on_inputs_changed)
+        self.api_key_input.textChanged.connect(self._on_inputs_changed)
+        self._on_inputs_changed()
+
+    def normalized_steamid64(self):
+        return extract_steam_id64(self.steamid_input.text())
+
+    def _set_validation_state(self, text: str, ok=False, warn=False):
+        color = "#8fb3cc"
+        if ok:
+            color = "#9fe3b3"
+        elif warn:
+            color = "#f2ce7e"
+        self.validation_label.setStyleSheet(f"color:{color}; font-size:11px;")
+        self.validation_label.setText(text)
+
+    def _on_inputs_changed(self):
+        self._validation_ok = False
+        raw_value = self.steamid_input.text().strip()
+        normalized = self.normalized_steamid64()
+        key = self.api_key_input.text().strip()
+        if raw_value and not normalized:
+            self._set_validation_state("Steam ID64 not detected. Paste the numeric ID or a URL containing it.", warn=True)
+            return
+        if not raw_value or not key:
+            self._set_validation_state("Enter Steam ID64 and API key, then validate.")
+            return
+        self._set_validation_state("Ready to validate connection.")
+
+    def validate_connection(self):
+        steamid64 = self.normalized_steamid64()
+        api_key = self.api_key_input.text().strip()
+        if not steamid64:
+            self._set_validation_state("Steam ID64 not detected in the value you entered.", warn=True)
+            return
+        if not api_key:
+            self._set_validation_state("Steam Web API key is required.", warn=True)
+            return
+        try:
+            get_owned_games(api_key=api_key, steamid64=steamid64, include_free=False, timeout=10)
+            self._validation_ok = True
+            self._set_validation_state("Connection verified. You can save now.", ok=True)
+        except Exception as exc:
+            self._validation_ok = False
+            self._set_validation_state(f"Could not verify connection: {exc}", warn=True)
 
 
 class EpicIntegrationDialog(QDialog):
@@ -1763,13 +1868,24 @@ class GameGridApp(QWidget):
         topbar_layout.setContentsMargins(12, 0, 12, 0)
         topbar_layout.setSpacing(6)
 
-        self.btn_integrations = make_topbar_button("Intergrations")
+        self.btn_integrations = make_topbar_button("Integrations")
         self.btn_settings = make_topbar_button("Settings")
-        self.btn_help = make_topbar_button("Help")
+        self.steam_status_chip = QLabel("")
+        self.steam_status_chip.setStyleSheet("""
+            QLabel{
+                color:#b7cbda;
+                background:#0b121a;
+                border:1px solid rgba(255,255,255,0.14);
+                border-radius:9px;
+                padding: 3px 8px;
+                font-size:11px;
+                font-weight:600;
+            }
+        """)
 
         topbar_layout.addWidget(self.btn_integrations)
         topbar_layout.addWidget(self.btn_settings)
-        topbar_layout.addWidget(self.btn_help)
+        topbar_layout.addWidget(self.steam_status_chip)
         topbar_layout.addStretch()
 
         # Window controls
@@ -1793,7 +1909,7 @@ class GameGridApp(QWidget):
         btn_close.clicked.connect(self.close)
         self.btn_integrations.clicked.connect(self.open_integrations_popup)
         self.btn_settings.clicked.connect(self.open_settings_popup)
-        self.btn_help.clicked.connect(self.show_help_popup)
+        self._update_steam_status_chip()
 
         topbar_layout.addWidget(btn_min)
         topbar_layout.addWidget(btn_max)
@@ -1824,7 +1940,7 @@ class GameGridApp(QWidget):
         self.update_all_games_label()
         self._load_window_state()
         self._start_cover_prefetch()
-        QTimer.singleShot(0, self._maybe_prompt_desktop_shortcut)
+        QTimer.singleShot(0, self._run_startup_prompts)
     
     def build_bottom_bar(self):
         bar = QWidget()
@@ -1869,6 +1985,30 @@ class GameGridApp(QWidget):
                 selection-background-color: rgba(102,192,244,0.2);
             }
         """)
+        self.collections_help_bubble = QPushButton("?")
+        self.collections_help_bubble.setObjectName("collectionsHelpBubble")
+        self.collections_help_bubble.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.collections_help_bubble.setFixedSize(16, 16)
+        self.collections_help_bubble.setToolTip(
+            "Collections Tips:\n"
+            "1. Select a collection, then right-click the closed collection box to Edit/Delete it.\n"
+            "2. Right-click a game card to add it to a manual collection quickly."
+        )
+        self.collections_help_bubble.setStyleSheet("""
+            QPushButton#collectionsHelpBubble{
+                background:#0f1a24;
+                border:1px solid rgba(102,192,244,0.6);
+                border-radius:8px;
+                color:#9fd8ff;
+                font-size:10px;
+                font-weight:600;
+                padding:0px;
+            }
+            QPushButton#collectionsHelpBubble:hover{
+                border:1px solid rgba(102,192,244,0.95);
+                color:#e8f7ff;
+            }
+        """)
         self.installed_toggle_btn = InstalledFilterButton()
 
         self.sort_box = SortComboBox()
@@ -1906,6 +2046,7 @@ class GameGridApp(QWidget):
         """)
 
         left_layout.addWidget(self.collection_box)
+        left_layout.addWidget(self.collections_help_bubble)
         left_layout.addWidget(self.installed_toggle_btn)
         left_layout.addWidget(self.sort_box)
 
@@ -2912,6 +3053,54 @@ class GameGridApp(QWidget):
         if answer == QMessageBox.StandardButton.Yes:
             self._create_desktop_shortcut(show_feedback=True)
 
+    def _run_startup_prompts(self):
+        self._maybe_prompt_desktop_shortcut()
+        self._maybe_show_onboarding_hints()
+
+    def _maybe_show_onboarding_hints(self):
+        shown = bool(self._settings.value("ui/onboarding_hints_shown", False, type=bool))
+        if shown:
+            return
+        self._settings.setValue("ui/onboarding_hints_shown", True)
+        self._settings.sync()
+        QMessageBox.information(
+            self,
+            "Quick Start",
+            "1. Open Integrations to connect Steam for richer metadata.\n"
+            "2. Use the ? next to Collections for quick tips.\n"
+            "3. Right-click a game card to add it to a manual collection.",
+        )
+
+    def _update_steam_status_chip(self):
+        steamid64, api_key = self._load_steam_credentials()
+        connected = bool(steamid64 and api_key)
+        if connected:
+            self.steam_status_chip.setText("Steam: Connected")
+            self.steam_status_chip.setStyleSheet("""
+                QLabel{
+                    color:#bff2cd;
+                    background:#10211a;
+                    border:1px solid rgba(126,224,156,0.45);
+                    border-radius:9px;
+                    padding: 3px 8px;
+                    font-size:11px;
+                    font-weight:600;
+                }
+            """)
+        else:
+            self.steam_status_chip.setText("Steam: Not Connected")
+            self.steam_status_chip.setStyleSheet("""
+                QLabel{
+                    color:#b7cbda;
+                    background:#0b121a;
+                    border:1px solid rgba(255,255,255,0.14);
+                    border-radius:9px;
+                    padding: 3px 8px;
+                    font-size:11px;
+                    font-weight:600;
+                }
+            """)
+
     def open_integrations_popup(self):
         if self._integrations_popup is None:
             self._integrations_popup = IntegrationsPopup(self)
@@ -2921,16 +3110,6 @@ class GameGridApp(QWidget):
         popup_pos = self.btn_integrations.mapToGlobal(QPoint(0, self.btn_integrations.height() + 6))
         self._integrations_popup.move(popup_pos)
         self._integrations_popup.show()
-
-    def show_help_popup(self):
-        QMessageBox.information(
-            self,
-            "Help",
-            "Collections Tips:\n"
-            "1. Open the collections dropdown and choose 'New Collection...' to create one.\n"
-            "2. Select a collection, then right-click the closed collection box to Edit/Delete it.\n"
-            "3. Right-click a game card to add it to a manual collection quickly.",
-        )
 
     def _load_steam_credentials(self):
         steamid64 = str(self._settings.value("integrations/steam_id64", "", type=str) or "").strip()
@@ -2951,16 +3130,17 @@ class GameGridApp(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        steamid64 = dialog.steamid_input.text().strip()
+        steamid64 = dialog.normalized_steamid64()
         api_key = dialog.api_key_input.text().strip()
-        if not steamid64 or not steamid64.isdigit():
-            QMessageBox.warning(self, "Invalid Steam ID", "Steam ID64 must be numeric.")
+        if not steamid64:
+            QMessageBox.warning(self, "Invalid Steam ID", "Paste a numeric SteamID64 or a URL containing one.")
             return
         if not api_key:
             QMessageBox.warning(self, "Invalid API Key", "Steam Web API key is required.")
             return
 
         self._save_steam_credentials(steamid64, api_key)
+        self._update_steam_status_chip()
         self.refresh_game_library()
 
     def open_epic_integration_dialog(self):
@@ -3535,17 +3715,73 @@ class GameGridApp(QWidget):
 
         visible_cards = self._filtered_cards()
         if not visible_cards:
-            no_results = QLabel("No games match your search.")
-            no_results.setStyleSheet("color:#8aa6c1; font-size:14px;")
-            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.grid.addWidget(
-                no_results,
-                0,
-                0,
-                1,
-                max(1, columns),
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
-            )
+            if not self.cards:
+                empty_panel = QFrame()
+                empty_panel.setStyleSheet("""
+                    QFrame{
+                        background:#101722;
+                        border:1px solid rgba(255,255,255,0.10);
+                        border-radius:10px;
+                    }
+                    QLabel{
+                        color:#8aa6c1;
+                        background:transparent;
+                    }
+                    QPushButton{
+                        background:#1b2838;
+                        color:#d7e9f8;
+                        border:1px solid rgba(255,255,255,0.12);
+                        border-radius:8px;
+                        padding: 7px 12px;
+                        font-size:12px;
+                    }
+                    QPushButton:hover{
+                        border:1px solid rgba(102,192,244,0.9);
+                        color:#ffffff;
+                    }
+                """)
+                panel_layout = QVBoxLayout(empty_panel)
+                panel_layout.setContentsMargins(18, 16, 18, 16)
+                panel_layout.setSpacing(10)
+
+                title = QLabel("No games found yet.")
+                title.setStyleSheet("color:#c7d5e0; font-size:14px; font-weight:600;")
+                body = QLabel("Try refreshing your library or opening Integrations to connect Steam.")
+                body.setWordWrap(True)
+
+                actions = QHBoxLayout()
+                refresh_btn = QPushButton("Refresh Library")
+                integrations_btn = QPushButton("Open Integrations")
+                refresh_btn.clicked.connect(self.refresh_game_library)
+                integrations_btn.clicked.connect(self.open_integrations_popup)
+                actions.addWidget(refresh_btn)
+                actions.addWidget(integrations_btn)
+                actions.addStretch()
+
+                panel_layout.addWidget(title)
+                panel_layout.addWidget(body)
+                panel_layout.addLayout(actions)
+
+                self.grid.addWidget(
+                    empty_panel,
+                    0,
+                    0,
+                    1,
+                    max(1, columns),
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                )
+            else:
+                no_results = QLabel("No games match your search.")
+                no_results.setStyleSheet("color:#8aa6c1; font-size:14px;")
+                no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.grid.addWidget(
+                    no_results,
+                    0,
+                    0,
+                    1,
+                    max(1, columns),
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                )
             return
 
         row = col = 0

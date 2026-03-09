@@ -3055,14 +3055,12 @@ class GameGridApp(QWidget):
 
     def _run_startup_prompts(self):
         self._maybe_prompt_desktop_shortcut()
-        self._maybe_show_onboarding_hints()
+        QTimer.singleShot(0, self._maybe_show_onboarding_hints)
 
     def _maybe_show_onboarding_hints(self):
         shown = bool(self._settings.value("ui/onboarding_hints_shown", False, type=bool))
         if shown:
             return
-        self._settings.setValue("ui/onboarding_hints_shown", True)
-        self._settings.sync()
         QMessageBox.information(
             self,
             "Quick Start",
@@ -3070,6 +3068,8 @@ class GameGridApp(QWidget):
             "2. Use the ? next to Collections for quick tips.\n"
             "3. Right-click a game card to add it to a manual collection.",
         )
+        self._settings.setValue("ui/onboarding_hints_shown", True)
+        self._settings.sync()
 
     def _update_steam_status_chip(self):
         steamid64, api_key = self._load_steam_credentials()

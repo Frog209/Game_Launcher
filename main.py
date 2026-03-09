@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QCursor, QPainter, QColor, QAction, QDesktopServices
 from PyQt6.QtCore import (
-    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths, QUrl
+    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths, QUrl, QEvent
 )
 
 if getattr(sys, "frozen", False):
@@ -495,6 +495,7 @@ class GameCard(QWidget):
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("border-radius: 6px;")
+        self.image_label.installEventFilter(self)
         content_layout.addWidget(self.image_label, 1)
 
         # Dedicated footer area for metadata (play time / last played).
@@ -658,6 +659,11 @@ class GameCard(QWidget):
         self._base_rect = QRect(0, 0, self.width(), self.height())
         self.content.setGeometry(self._base_rect)
         self._apply_pixmap()
+
+    def eventFilter(self, obj, event):
+        if obj is self.image_label and event.type() == QEvent.Type.Resize:
+            self._apply_pixmap()
+        return super().eventFilter(obj, event)
 
     def enterEvent(self, event):
         self.raise_()

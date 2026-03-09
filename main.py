@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QCursor, QPainter, QColor, QAction, QDesktopServices
 from PyQt6.QtCore import (
-    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths, QUrl, QEvent
+    Qt, QPropertyAnimation, QEasingCurve, QRect, QSettings, QPoint, QTimer, pyqtSignal, QStandardPaths, QUrl
 )
 
 if getattr(sys, "frozen", False):
@@ -495,7 +495,6 @@ class GameCard(QWidget):
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("border-radius: 6px;")
-        self.image_label.installEventFilter(self)
         content_layout.addWidget(self.image_label, 1)
 
         # Dedicated footer area for metadata (play time / last played).
@@ -659,11 +658,6 @@ class GameCard(QWidget):
         self._base_rect = QRect(0, 0, self.width(), self.height())
         self.content.setGeometry(self._base_rect)
         self._apply_pixmap()
-
-    def eventFilter(self, obj, event):
-        if obj is self.image_label and event.type() == QEvent.Type.Resize:
-            self._apply_pixmap()
-        return super().eventFilter(obj, event)
 
     def enterEvent(self, event):
         self.raise_()
@@ -1798,7 +1792,8 @@ class ResizeHandle(QWidget):
             y += h - new_h
             h = new_h
 
-        avail = window._virtual_geometry() if hasattr(window, "_virtual_geometry") else QApplication.primaryScreen().geometry()
+        screen = QApplication.screenAt(event.globalPosition().toPoint()) or window.screen() or QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else QRect(0, 0, 1920, 1080)
         w = min(w, avail.width())
         h = min(h, avail.height())
         x = min(max(x, avail.left()), avail.left() + max(0, avail.width() - w))
@@ -1838,6 +1833,15 @@ class GameGridApp(QWidget):
         self.runtimeTracked.connect(self._apply_epic_runtime_minutes)
         self._did_initial_post_show_layout = False
         self._cover_prefetch_running = False
+        self._pixmap_refresh_pending = False
+        self._is_live_resizing = False
+        self._last_live_reflow_ts = 0.0
+        self._resize_live_timer = QTimer(self)
+        self._resize_live_timer.setSingleShot(True)
+        self._resize_live_timer.timeout.connect(self._run_live_resize_reflow)
+        self._resize_settle_timer = QTimer(self)
+        self._resize_settle_timer.setSingleShot(True)
+        self._resize_settle_timer.timeout.connect(self._on_resize_settled)
         self._epic_last_scan_at = None
         self._epic_last_detected_count = 0
         self._epic_missing_executable_count = 0
@@ -3309,7 +3313,19 @@ class GameGridApp(QWidget):
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
             return QRect(0, 0, 1920, 1080)
-        return screen.geometry()
+        return screen.availableGeometry()
+
+    def _clamped_rect_to_available(self, rect: QRect):
+        avail = self._available_geometry()
+        min_w = max(1, self.minimumWidth())
+        min_h = max(1, self.minimumHeight())
+        w = max(min_w, min(rect.width(), avail.width()))
+        h = max(min_h, min(rect.height(), avail.height()))
+        max_x = avail.left() + max(0, avail.width() - w)
+        max_y = avail.top() + max(0, avail.height() - h)
+        x = min(max(rect.x(), avail.left()), max_x)
+        y = min(max(rect.y(), avail.top()), max_y)
+        return QRect(x, y, w, h)
 
     def _virtual_geometry(self):
         screens = QApplication.screens()
@@ -3323,32 +3339,41 @@ class GameGridApp(QWidget):
     def _force_normal_state(self):
         # Ensure Windows does not treat this frameless window as maximized
         # when we are applying a normal geometry rectangle.
-        state = self.windowState()
-        state &= ~Qt.WindowState.WindowMaximized
-        state &= ~Qt.WindowState.WindowFullScreen
-        self.setWindowState(state)
+        self.setWindowState(Qt.WindowState.WindowNoState)
 
-    def _restore_from_maximized(self):
-        self.showNormal()
-        QTimer.singleShot(0, self._finish_restore_from_maximized)
-
-    def _finish_restore_from_maximized(self):
-        # Some Windows setups keep maximized state for a tick.
-        if self.isMaximized():
-            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMaximized)
-            QTimer.singleShot(0, self._finish_restore_from_maximized)
-            return
+    def _restore_target_rect(self):
+        g = self.normalGeometry()
+        if g.isNull() or g.width() <= 0 or g.height() <= 0:
+            saved_rect = self._settings.value("window/normal_rect")
+            if isinstance(saved_rect, (list, tuple)) and len(saved_rect) == 4:
+                try:
+                    x, y, w, h = [int(v) for v in saved_rect]
+                    g = QRect(x, y, w, h)
+                except Exception:
+                    g = QRect()
+        if not g.isNull() and g.width() >= self.minimumWidth() and g.height() >= self.minimumHeight():
+            return g
 
         avail = self._available_geometry()
-        # If Qt restored a near-maximized/off-screen normal geometry, reset to sane size.
-        if self.width() >= (avail.width() - 40) or self.height() >= (avail.height() - 40):
-            target_w = max(self.minimumWidth(), min(1280, int(avail.width() * 0.75)))
-            target_h = max(self.minimumHeight(), min(800, int(avail.height() * 0.75)))
-            x = avail.left() + max(0, (avail.width() - target_w) // 2)
-            y = avail.top() + max(0, (avail.height() - target_h) // 2)
-            self.setGeometry(x, y, target_w, target_h)
-        else:
-            self._clamp_to_available_screen()
+        target_w = max(self.minimumWidth(), min(1280, int(avail.width() * 0.75)))
+        target_h = max(self.minimumHeight(), min(800, int(avail.height() * 0.75)))
+        x = avail.left() + max(0, (avail.width() - target_w) // 2)
+        y = avail.top() + max(0, (avail.height() - target_h) // 2)
+        return QRect(x, y, target_w, target_h)
+
+    def _restore_from_maximized(self):
+        target = self._restore_target_rect()
+        self._force_normal_state()
+        self.showNormal()
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        QTimer.singleShot(0, lambda t=QRect(target): self._apply_restored_geometry(t))
+
+    def _apply_restored_geometry(self, target: QRect):
+        self._force_normal_state()
+        self.showNormal()
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self.setGeometry(self._clamped_rect_to_available(target))
+        self._clamp_to_available_screen()
 
     def _save_window_state(self):
         is_maximized = self.isMaximized()
@@ -3766,11 +3791,52 @@ class GameGridApp(QWidget):
                 col = 0
                 row += 1
 
+        self._schedule_pixmap_refresh()
+
+    def _schedule_pixmap_refresh(self):
+        if self._is_live_resizing:
+            return
+        if self._pixmap_refresh_pending:
+            return
+        self._pixmap_refresh_pending = True
+        QTimer.singleShot(0, self._refresh_visible_card_pixmaps)
+
+    def _refresh_visible_card_pixmaps(self):
+        self._pixmap_refresh_pending = False
+        for card in self.cards:
+            if card.isVisible():
+                card._apply_pixmap()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._is_live_resizing = True
         self._update_search_bar_width()
-        self.reflow_grid()
         self._layout_resize_handles()
+
+        min_interval = 1.0 / 30.0  # Cap heavy reflow work to ~30 FPS during drag resize.
+        now = time.monotonic()
+        elapsed = now - self._last_live_reflow_ts
+        if elapsed >= min_interval:
+            self._run_live_resize_reflow()
+        else:
+            remaining_ms = max(1, int((min_interval - elapsed) * 1000))
+            if not self._resize_live_timer.isActive():
+                self._resize_live_timer.start(remaining_ms)
+
+        self._resize_settle_timer.start(110)
+
+    def _run_live_resize_reflow(self):
+        if not self._is_live_resizing:
+            return
+        self._last_live_reflow_ts = time.monotonic()
+        self.reflow_grid()
+
+    def _on_resize_settled(self):
+        self._is_live_resizing = False
+        if self._resize_live_timer.isActive():
+            self._resize_live_timer.stop()
+        self.reflow_grid()
+        self._schedule_pixmap_refresh()
 
     def showEvent(self, event):
         super().showEvent(event)

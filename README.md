@@ -13,6 +13,18 @@ A portable Windows launcher for Steam and Epic games with cover art, collections
 ## Screenshots
 ![Game Launcher Main View](assets/screenshots/assetsview.png)
 
+## Project Structure
+- `.github/workflows/` - GitHub Actions workflow that builds the portable Windows release zip.
+- `assets/screenshots/` - README screenshots and media assets.
+- `.gitignore` - Files/folders excluded from git (build output, local runtime data, etc.).
+- `GameLauncher.spec` - PyInstaller build recipe for creating the packaged app.
+- `LICENSE` - MIT license for this project.
+- `README.md` - Project documentation and usage instructions.
+- `build_portable.ps1` - Local build script for creating a portable release zip.
+- `collections.json` - Starter/default collection configuration.
+- `requirements.txt` - Python dependencies used to run/build the app.
+- `ui_test.py` - Main application source code.
+
 ## Download (Windows)
 1. Open the repo **Releases** page.
 2. Download `GameLauncher-portable-windows.zip` from the latest version.
